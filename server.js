@@ -1,6 +1,3 @@
-// Gacha Lumina - servidor de salas online.
-// Cada jugador que entra al modo Online crea su sala; el creador es el dueño.
-// Si el dueño se va, la sala se cierra y los demás reciben {t:'closed'}.
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
@@ -51,10 +48,11 @@ function join(c, id) {
 }
 
 wss.on('connection', ws => {
-  const c = { id: 'p' + (nextId++), ws, name: 'Jugador', look: {}, room: null, x: 0, y: 0, dir: 1, anim: 301, rtt: 0, chat: [], alive: true };
+  const c = { id: 'p' + (nextId++), ws, name: 'Jugador', look: {}, room: null, x: 0, y: 0, dir: 1, anim: 301, rtt: 0, chat: [], alive: true, last: Date.now() };
   clients.set(c.id, c);
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', data => {
+    c.last = Date.now();
     let m; try { m = JSON.parse(data.toString()); } catch (e) { return; }
     if (!m || typeof m.t !== 'string') return;
     switch (m.t) {
@@ -87,15 +85,25 @@ wss.on('connection', ws => {
       case 'rtt': c.rtt = Math.max(0, Math.min(5000, +m.ms | 0)); break;
     }
   });
-  ws.on('close', () => { leave(c, 'owner_left'); clients.delete(c.id); });
+  ws.on('close', () => drop(c));
   ws.on('error', () => {});
 });
 
-setInterval(() => {                                    // drop dead connections
-  for (const c of clients.values()) {
-    if (!c.alive) { try { c.ws.terminate(); } catch (e) {} continue; }
-    c.alive = false; try { c.ws.ping(); } catch (e) {}
+// The game sends a 'ping' every 3 s. If a player stops sending anything (power cut, internet down,
+// game killed) we drop them after DEAD_MS; if they owned a room, the room closes for everybody.
+const DEAD_MS = 15000;
+function drop(c) {
+  if (!clients.has(c.id)) return;
+  clients.delete(c.id);
+  leave(c, 'owner_left');
+  try { c.ws.terminate(); } catch (e) {}
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const c of [...clients.values()]) {
+    if (now - c.last > DEAD_MS) { drop(c); continue; }
+    try { c.ws.ping(); } catch (e) {}
   }
-}, 20000);
+}, 5000);
 
 server.listen(PORT, () => console.log('Gacha Lumina server listening on ' + PORT));
