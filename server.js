@@ -1,3 +1,6 @@
+// Gacha Lumina - servidor de salas online.
+// Cada jugador que entra al modo Online crea su sala; el creador es el dueño.
+// Si el dueño se va, la sala se cierra y los demás reciben {t:'closed'}.
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
@@ -14,6 +17,8 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 
 const send = (c, m) => { if (c.ws.readyState === 1) c.ws.send(JSON.stringify(m)); };
+// cualquier link (http, www, dominio.com, discord . gg, etc.) se bloquea
+const LINK_RE = /(https?:|www\s*\.|:\/\/|\b[a-z0-9-]+\s*(\.|\(dot\)|\[\.\]|\(\.\)|\s(dot|punto)\s)\s*(com|net|org|gg|io|xyz|ly|tk|ml|ga|cf|gq|ru|tv|fm|cc|gl|biz|vip)\b|\b[a-z0-9-]+\.(es|me|co|to|in|de|us|uk|be|id|fun|top|pro|live|page|link|site|online|store|shop|club|app|info|dev|eu|fr|br|jp|kr|cn|cl|ar|mx|pe|ve|uy|py|bo|ec)(\b|\/)|discord\s*\.?\s*gg|\b(punto|dot)\s*(com|net|org|gg))/i;
 const pub = c => ({ id: c.id, name: c.name, look: c.look, x: c.x, y: c.y, dir: c.dir, anim: c.anim });
 const clean = (s, n) => String(s == null ? '' : s).replace(/[\u0000-\u001f]/g, '').slice(0, n);
 const roomInfo = r => ({ id: r.id, name: r.name, pub: r.pub, count: r.members.size, max: MAX_PLAYERS, ownerRtt: r.owner.rtt || 0 });
@@ -58,6 +63,7 @@ wss.on('connection', ws => {
     switch (m.t) {
       case 'hello':
         c.name = clean(m.name, 24) || 'Jugador';
+        if (LINK_RE.test(c.name)) c.name = 'Jugador';
         if (m.look && typeof m.look === 'object' && JSON.stringify(m.look).length < 16000) c.look = m.look;
         send(c, { t: 'welcome', id: c.id }); break;
       case 'host': host(c, m.pub !== false); break;
@@ -78,6 +84,7 @@ wss.on('connection', ws => {
         if (c.chat.length >= 5) return send(c, { t: 'cool', ms: 5000 });
         c.chat.push(now);
         const msg = clean(m.msg, 120); if (!msg || !c.room) return;
+        if (LINK_RE.test(msg)) return send(c, { t: 'err', msg: 'No se permiten links en el chat.' });
         for (const o of others(c.room, c)) send(o, { t: 'chat', id: c.id, msg });
         break;
       }
